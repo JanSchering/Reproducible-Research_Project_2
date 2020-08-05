@@ -1,0 +1,24 @@
+---
+title: "Analysis of NOAA Storm Data in regards to Population Health and Economic Consequences"
+author: "Jan Schering"
+date: "8/5/2020"
+output: html_document
+---
+
+# Synopsis 
+
+This paper is aiming to analyse the data provided by the NOAA Storm Database in regards to the implications of certain events. The goal is to find out which events are having the most dire consequences on society, based on two parameters. 
+
+The first parameter is harm caused in regards to human health/population health. The paper seeks to address, which events cause the most population harm across the United States.
+
+The second parameter is economic consequences. Within the analysis it will be explored which events cause the greatest measurable economic consequences. 
+
+# Data Processing
+
+This section provides an in-depth description of the Data Processing done for the analysis. The steps taken will be explained and reasoned. 
+
+
+
+# Results 
+
+After thorough exploration of the data in regards to the questions at hand, this chapter concludes the analysis by looking back on the goals/questions and summarizing the results.
