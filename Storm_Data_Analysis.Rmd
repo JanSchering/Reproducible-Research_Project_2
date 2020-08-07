@@ -13,12 +13,303 @@ The first parameter is harm caused in regards to human health/population health.
 
 The second parameter is economic consequences. Within the analysis it will be explored which events cause the greatest measurable economic consequences. 
 
+In the processing section the raw data is subset to only include relevant information and the events in the EVTYPE column are mapped to official NOAA events. THe data then gets grouped by the official event types and the sum of casualties and damages for each event calculated. The calculation shows that the most critical event for population health is Tornadoes, while the most critical event for economy is floods.
+
+# Introduction 
+
+The analysis in this paper is based on the NOAA Storm Data database. The specific data used can be downloaded under https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2
+
+The data used contains recordings of storm events between 1950 and 2011 in the USA. Each row in the data represents the observation of one event. It is important to note that a storm can consist of multiple events. 
+
+## Goal
+
+The goal of the analysis is to rank the most critical weather/storm events in the USA under two facets: Implication for population health and implication on economy. 
+
+In order to do this, the raw data gets processed in a way that allows for comparisons in the numbers to be drawn. Once the processing is done, the processed subset of the raw data is used to produce histograms of the population health and economy implications of the events. 
+
+The events can then be ranked in order of most- to least critical.
+
 # Data Processing
 
 This section provides an in-depth description of the Data Processing done for the analysis. The steps taken will be explained and reasoned. 
 
+## First Steps 
 
+As the first step, the data is loaded in and the structure of the data set is observed using the __names()__ function. The data is read directly from the compressed source file:
+
+```{r Loading the data set and looking at the structure, cache=TRUE, echo=TRUE}
+  
+  #the data is loaded straight from the compressed source file
+  data <- read.csv("./repdata_data_StormData.csv.bz2", stringsAsFactors = FALSE)
+
+  # prints the column names of the data set
+  print(names(data))
+
+```
+There are 37 columns in the data set.
+
+Not all of them, however, will be needed for the analysis. In order to make the data set easier to work with, the next step is to subset the relevant categories. For the question this paper seeks to explore these columns are:
+
+- BGN_DATE
+- END_DATE
+- EVTYPE
+- FATALITIES
+- INJURIES
+- PROPDMG
+- PROPDMGEXP
+- CROPDMG
+- CROPDMGEXP
+- REMARKS
+
+To achieve this structure a new data set named "relevant_data" is created as a subset of the source data set:
+
+```{r Subsetting the data set for the relevant columns}
+  
+  # getting a subset of the dataset by explicitly stating which rows should be included 
+  relevant_data <- data[, c("BGN_DATE", "END_DATE", "EVTYPE", "FATALITIES", "INJURIES", "PROPDMG", "PROPDMGEXP", "CROPDMG", "CROPDMGEXP", "REMARKS")]
+
+  # after the subsetting, str gives the structure of the subset 
+  print(str(relevant_data))
+
+```
+
+The resulting Data Frame contains observations of 10 variables 
+
+## Cleaning, Combining and Converting Information
+
+The relevant subset can be further reduced. 
+
+The columns "PROPDMG" and "CROPDMG" both have a related column "...EXP". This column is indicating the exponent of 10, by which to multiply the DMG value. The next step is to use the EXP columns to calculate the actual damage values. Taking a look at the values the columns can take on, they appear to be more noisy than expected:
+
+```{r The EXP columns}
+
+  # with the table function its possible to see how the CROP/PROP EXP columns are made up
+
+  print(table(relevant_data$PROPDMGEXP))
+
+  print(table(relevant_data$CROPDMGEXP))
+
+```
+As shown in the table, the columns can possibly take values between 0-8, as well as "?", "+" and the letters B, h, H, k, K, m, M. The letters stand for 
+
+- b|Billion
+- m|Million
+- h|Hundred
+
+while the numbers are giving the exponent of 10 to multiply the value with. The "?" as well as the "+" will be assumed to be faulty entries in the following and thus valued as 0. With this in mind, the EXP columns can be used to calculate the complete values in the DMG columns:
+
+```{r using the exponents to calculate damages, cache=TRUE, warning=FALSE}
+
+  # this helper function takes a numeric value + an exponent indicator from the EXP columns and returns the numeric multiplied with 
+  # 10 to the power of the exponent 
+  mapExponentsToValues <- function(x, y) {
+    
+    x <- as.numeric(x)
+    
+    if(y == "h" | y == "H") {
+      return (x * ( 10 ^ 2  ))
+    } else if (y == "k" | y == "K") {
+      return( x * (10 ^ 3)  )
+    } else if(y == "M" | y == "m") {
+      return( x * (10 ^ 6)  )
+    } else if(y == "b" | y == "B") {
+      return( x * ( 10 ^ 9 )  )
+    } else if(!is.na(as.numeric(y))) {
+      return( x * (10 ^ as.numeric(y))  )
+    } else {
+      return(0)
+    }
+  }
+
+  # the real values of both CROP and PROP damae are calculated with the helper function
+  relevant_data$PROPDMG <- mapply(mapExponentsToValues, relevant_data$PROPDMG, relevant_data$PROPDMGEXP)
+  
+  relevant_data$CROPDMG <- mapply(mapExponentsToValues, relevant_data$CROPDMG, relevant_data$CROPDMGEXP)
+  
+  # the data set can be subset again after the calculation as the exponent columns are not needed anymore 
+  relevant_data <- relevant_data[ , c("BGN_DATE", "END_DATE", "EVTYPE", "FATALITIES", "INJURIES", "PROPDMG", "CROPDMG", "REMARKS")]
+  
+  print(str(relevant_data))
+
+```
+
+The combination leaves 8 relevant columns in the data frame. 
+
+## Mapping the events in the set to the official NOAA event types
+
+Next, The events listed under "EVTYPE" have to be mapped to the official NOAA event types to allow for comparison. 
+
+In this analysis the mapping is done with the "amatch()" function, distributed with the stringdist R Package. The conversion is done with the following: 
+
+```{r Mapping EVTYPE to official NOAA Events by String similarity}
+
+  # the stringdist package provides fuctions to get and compare distances between strings
+  library(stringdist)
+
+  # to map the events in the column to the official events, a vector with all official events is created
+  official_events <- c("Astronomical Low Tide","Avalanche","Blizzard","Coastal Flood","Cold/Wind Chill","Debris Flow","Dense Fog","Dense Smoke","Drought","Dust Devil","Dust Storm","Excessive Heat","Extreme Cold/Wind Chill","Flash Flood","Flood","Freezing Fog","Frost/Freeze","Funnel Cloud","Hail","Heat","Heavy Rain","Heavy Snow","High Surf","High Wind","Hurricane/Typhoon","Ice Storm","Lakeshore Flood","Lake-Effect Snow","Lightning","Marine Hail","Marine High Wind","Marine Strong Wind","Marine Thunderstorm Wind","Rip Current","Seiche","Sleet","Storm Tide","Strong Wind","Thunderstorm Wind","Tornado","Tropical Depression","Tropical Storm","Tsunami","Volcanic Ash","Waterspout","Wildfire","Winter Storm","Winter Weather")
+
+  # the official events and the ones n the recordings get set to lowercase
+  official_events <- tolower(official_events)
+  relevant_data$EVTYPE <- tolower(relevant_data$EVTYPE)
+  
+  # amatch gets called on every row in the  data set. The result is used to get an official event from the vector, which then gets set 
+  # as a value in the new column EVTYPE_official in the data set
+  relevant_data$EVTYPE_official <- official_events[amatch(relevant_data$EVTYPE, official_events, method="lv",  maxDist=20)]
+
+```
+
+To check the result of the mapping, the column will be shown as a table. Additionally the amount of unique variables in the column is shown:
+
+```{r result of mapping the event type}
+  
+  print(table(relevant_data$EVTYPE_official))
+
+  print(length(table(relevant_data$EVTYPE_official)))
+
+
+
+```
+
+The Column now has been mapped to the 48 official events, as indicated by there being 48 unique values in the column after the mapping. 
+
+# Exploratory Analysis 
+
+In this section the tidied data set is used to find answers for the two overarching themes of the analysis: Population Health and Economy. For this, the tidied data will be further subset to filter out irrelevant observations for the respective question. Afterwards the relevant observations will be used to calculate key values and create figures to visualize the answers.
+
+## Exploring Implications on Population Health
+
+First, the events relevant to population health will be explored. For this the relevant observations will be filtered and the key figures calculated.
+
+### Filtering out observations relevant to population health
+
+Population health consequences are measured in 2 categories in the data set: Fatalities and Injuries. This means, that in order to analyze the damages, it would be recommended to only work with the observations, which actually include a value for either the Fatalities or Injuries. The relevant observations are filtered out and stored in a subset:
+
+```{r getting the population-health-relevant observations}
+
+  # the data set is subset to only include observations that have a value higher than 0 in the INJURIES or the FATALITIES
+  population_critical_observations <- relevant_data[relevant_data$FATALITIES > 0 | relevant_data$INJURIES > 0,]
+
+```
+
+The subset with the observations relevant to population health contains `r nrow(population_critical_observations)` observations. 
+
+### Calculating key figures in regards to population health
+
+Now that the irrelevant observations have been filtered out, The total weighted casualties caused can be calculated in general and in respect to the types of events. 
+
+In this analysis, fatalities will be weighted higher than injuries by a factor of 2. First, the total weighted casualties without respect to event are calculated. The highest observation will be shown with EVTYPE_official, BGN_DATE, END_DATE, weighted_casualties:
+
+```{r Calculating Total weighted casualties}
+
+  # a new column "weighted_casualties" in the data set is created. The column gets filled with the weighted sum of INJURIES and
+  # FATALITIES of the respective rows 
+  population_critical_observations$weighted_casualties <- population_critical_observations$INJURIES + 2 *  population_critical_observations$FATALITIES 
+
+  # printing out the event with the max casualty
+print(population_critical_observations[population_critical_observations$weighted_casualties == max(population_critical_observations$weighted_casualties), c("EVTYPE_official", "BGN_DATE", "END_DATE", "weighted_casualties")])
+```
+The calculation shows that the highest casualties of a singular event were caused by a tornado on the 10th of April 1979 with a total of 1784 casualties. 
+
+Additionally to this, the observations will be grouped by event and then the sums of weighted casualties taken. This data frame can then be used to rank the events according to the total casualties caused from start of observation until 2011: 
+
+```{r Grouping Observations by Event and calculating the sum of the weighted casualties}
+  
+  #package for grouping 
+  library(dplyr)
+
+  # first the data is grouped by event, then the sum is taken for each group
+  event_casualty_sums <- population_critical_observations %>% group_by(EVTYPE_official) %>% summarize_at("weighted_casualties", sum)
+  
+  #Order the result
+  event_casualty_sums <- event_casualty_sums[order(-event_casualty_sums$weighted_casualties),]
+  
+  # after ordering the groups by their sum of casualties, here the top 10 events are printed
+  print( head(event_casualty_sums , n = 10 ) ) 
+
+```
+
+## Exploring Implications on Economy 
+
+Economic consequences are measured in two factors in the data set: CROP_DMG and PROP_DMG, meaning the amount of monetary damage to crops and the amount of monetary damage caused to properties as a result of an event. 
+
+### Getting the Economy-Damage-relevant observations
+
+Analogous to the casualties, it makes sense to focus the analysis on only the observations that contain damage observed. The observations without any damage can be filtered out:
+
+```{r Getting the Economy-Damage-related observations}
+
+  # subsetting the data set to only include the observations with CROP or PROP damage higher than 0
+  economy_related_observations <- relevant_data[relevant_data$CROPDMG > 0 | relevant_data$PROPDMG > 0,]  
+
+```
+
+
+### Calculating Key figures for the economic implications
+
+To better explore the consequences, it will be useful to combine the two into a economic_damage field. Unlike the casualties for the population, this combination does not have to be weighted, as there is no clear argument for either to be more severe. After calculation the singular event with the hghest economic damage will be shown.
+
+```{r Calculating the economic damage, cache=TRUE}
+
+  # in the subset, a new column "economic_damage" is created which contains the sum of the crop and the prop damage 
+  economy_related_observations$economic_damage <- economy_related_observations$CROPDMG + economy_related_observations$PROPDMG
+
+  # Print out the observation with the highest economic damage 
+  print(economy_related_observations[economy_related_observations$economic_damage == max(economy_related_observations$economic_damage), c("EVTYPE_official", "BGN_DATE", "END_DATE", "economic_damage")])
+
+```
+
+The result shows that the event with the highest economic damage was a flood on the 1st of January 2006, which caused an economic_damage of 115032500000 or about 115 billion dollars.
+
+The observations will be further grouped into their respective events, calculating the sum of all damages for each event. After the calculation, the events can be ranked according to their total_economic_damages values.
+
+```{r Grouping the Observations by event and calculating the total_economic_damages}
+
+  # first the subset is grouped by the EVTYPE_official column, afterwards for each group the sum is calculated 
+  total_economic_damages <- economy_related_observations %>% group_by(EVTYPE_official) %>% summarize_at("economic_damage", sum)
+
+  #Order the result
+  total_economic_damages <- total_economic_damages[order(-total_economic_damages$economic_damage),]
+  
+  # print the 10 events with the highest damages in order 
+  print( head(total_economic_damages , n = 10 ) ) 
+
+```
 
 # Results 
 
 After thorough exploration of the data in regards to the questions at hand, this chapter concludes the analysis by looking back on the goals/questions and summarizing the results.
+
+### Visualizing and interpreting the top 10 most critical Events in regards to economic damages
+
+The table shows the 10 events with the highest total economic damage caused since the start of the recording. At the 1st place, floods have caused damages estimated around 150 Billion Dollars. This is almost double the amount of the second place, where hurricanes/typhoons have caused a total of 75.5 Billion Dollars. The rest of the top ranges more closely down to 9.2 Billion dollars for the 10th most critical event, "wildfires"
+
+To further illustrate the data, a barplot with the total damages is drawn.
+
+```{r Visualizing the top 10 most economically critical events}
+
+  top_ten <- head(total_economic_damages , n = 10 )
+    
+  #adjust the margins of the device
+  par(mai=c(1,4,1,1))
+
+  bp <- with(top_ten, barplot(economic_damage, horiz = TRUE, names.arg = EVTYPE_official, las = 1, xlim = c(9000000000, 160000000000), main = "Top 10 Total Economic Damages grouped by Event", xlab = "Amount of Damage in Dollars" ) )
+
+```
+
+### Interpreting and visualizing the top 10 most critical events for population health
+
+The table shows the top 10 events that caused the highest weighted casualties since the start of the recording. It is visible that "Tornadoes" are at a clear 1st place with almost 10 times the amount of weighted casualties as "excessive  heat" at the second place, with 102,671 and 10,743 weighted casualties respectively. After that, the values are closer grouped together with place 2-10 ranging from 10,743 to 1,965 weighted casualties. 
+
+To further illustrate the impact of each event, the next step is to draw a barplot of the weighted casualties measured by event.
+
+```{r Visualizing the Top Ten most Critical events for population health}
+  
+  top_ten <- head(event_casualty_sums , n = 10 )
+    
+  #adjust the margins of the device
+  par(mai=c(1,2,1,1))
+
+  bp <- with(top_ten, barplot(weighted_casualties, horiz = TRUE, names.arg = EVTYPE_official, las = 1, xlim = c(0, 103000), main = "Top 10 Total weighted Sums of Casualties grouped by Event", xlab = "Number of Casualties (Fatalities are weighted double)" ) )
+
+```
